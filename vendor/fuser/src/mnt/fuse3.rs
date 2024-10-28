@@ -12,6 +12,7 @@ use std::{
     ptr,
     sync::Arc,
 };
+use libc::c_int;
 
 /// Ensures that an os error is never 0/Success
 fn ensure_last_os_error() -> io::Error {
@@ -45,13 +46,15 @@ impl Mount {
             }
             // We dup the fd here as the existing fd is owned by the fuse_session, and we
             // don't want it being closed out from under us:
-            let fd = unsafe { libc::dup(fd) };
-            if fd < 0 {
-                return Err(io::Error::last_os_error());
-            }
+            let fd = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_DUPFD_CLOEXEC(0))?;
             let file = unsafe { File::from_raw_fd(fd) };
             Ok((Arc::new(file), mount))
         })
+    }
+
+    #[cfg(feature = "multithreading")]
+    pub fn session_fd(&self) -> c_int {
+        unsafe { fuse_session_fd(self.fuse_session) }
     }
 }
 impl Drop for Mount {

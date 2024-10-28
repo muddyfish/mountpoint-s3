@@ -29,6 +29,7 @@ use fuser::{
 const NUMFILES: u8 = 16;
 const MAXBYTES: u64 = 10;
 
+
 struct FSelData {
     bytecnt: [u64; NUMFILES as usize],
     open_mask: u16,
@@ -36,6 +37,7 @@ struct FSelData {
     poll_handles: [u64; NUMFILES as usize],
 }
 
+#[derive(Clone)]
 struct FSelFS {
     data: Arc<Mutex<FSelData>>,
 }
@@ -101,7 +103,7 @@ impl fuser::Filesystem for FSelFS {
         reply.entry(&Duration::ZERO, &self.get_data().filestat(idx), 0);
     }
 
-    fn getattr(&self, _req: &Request, ino: u64, reply: fuser::ReplyAttr) {
+    fn getattr(&self, _req: &Request, ino: u64, _fh: Option<u64>, reply: fuser::ReplyAttr) {
         if ino == FUSE_ROOT_ID {
             let a = FileAttr {
                 ino: FUSE_ROOT_ID,
@@ -337,8 +339,8 @@ fn main() {
     let fs = FSelFS { data: data.clone() };
 
     let mntpt = std::env::args().nth(1).unwrap();
-    let session = fuser::Session::new(fs, mntpt.as_ref(), &options).unwrap();
-    let bg = session.spawn().unwrap();
+    let session = fuser::Session::new(fs, mntpt, &options).unwrap();
+    let bg = session.spawn(1).unwrap();
 
     producer(&data, &bg.notifier());
 }
