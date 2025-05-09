@@ -24,7 +24,7 @@ impl TryFrom<FsTabCliArgs> for CliArgs {
         let cli_arg_list = fstab_cli_args.into_cli_arg_list()?;
 
         let mut cli_args = CliArgs::try_parse_from(cli_arg_list)?;
-        cli_args.foreground = true;
+        cli_args.foreground = false;
         Ok(cli_args)
     }
 }
@@ -56,7 +56,7 @@ impl FsTabCliArgs {
     /// Options prefixed with `x-` are 'comments' in fstab, and can be ignored by us.
     fn option_allowed(option: &str) -> bool {
         // Same as from https://github.com/libfuse/sshfs/blob/ed0825440c48895b7e20cc1440bbafd8d9c88eb8/sshfs.c#L533-L538 with addition of `rw` argument
-        !(["auto", "noauto", "user", "nouser", "users", "_netdev", "rw"].contains(&option) || option.starts_with("x-"))
+        !(["auto", "noauto", "user", "nouser", "users", "nodev", "nosuid", "_netdev", "rw"].contains(&option) || option.starts_with("x-"))
     }
 
     fn rename_option(option: String) -> String {

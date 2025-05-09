@@ -1,62 +1,45 @@
-if [ -z "${!FSTAB_CONTENT}" ]; then
-    echo "Need to set environment var $VARIABLE" && exit 1;
-else
-
-cargo build --bin mount-s3 --release --features=fstab
-
-export SYSTEMD_FSTAB=$(mktemp)
-export SYSTEMD_PROC_CMDLINE=""
-
-MOUNTPOINT_PATH=$(pwd)/target/release/mount-s3
-OUTPUT_DIR=./out
-GENERATOR_BIN="/usr/lib/systemd/system-generators/systemd-fstab-generator"
-SYSTEMD_MOUNT_UNIT=/etc/systemd/system/mnt-mountpoint.mount
-
-echo "Mountpoint path: $MOUNTPOINT_PATH"
-
-cat > "$SYSTEMD_FSTAB" <<- EOM
-${MOUNTPOINT_PATH}#${S3_BUCKET_NAME} /mnt/mountpoint fuse rw,allow-delete,allow-other,_netdev,nosuid,nodev
-EOM
-
-exit 0
-
-echo "fstab file:"
-cat "$SYSTEMD_FSTAB"
-
-rm -r $OUTPUT_DIR || true
-mkdir -p "$OUTPUT_DIR"/{normal,early,late}
-
-$GENERATOR_BIN "$OUTPUT_DIR/normal" "$OUTPUT_DIR/early" "$OUTPUT_DIR/late"
-
-MOUNT_UNIT="$OUTPUT_DIR/normal/mnt-mountpoint.mount"
-cat "$MOUNT_UNIT"
-
-sudo cp $MOUNT_UNIT $SYSTEMD_MOUNT_UNIT
-sudo systemctl daemon-reload
-sudo systemctl start mnt-mountpoint.mount
-
-
-echo "\nStatus of systemd unit:"
-sudo systemctl status mnt-mountpoint.mount | cat
-
-function cleanup {
-  sudo umount /mnt/mountpoint
-  sudo systemctl stop mnt-mountpoint.mount
-  rm "$SYSTEMD_FSTAB"
-  sudo rm "$SYSTEMD_MOUNT_UNIT"
+function build_mountpoint() {
+  cargo build --bin mount-s3 --release --features=fstab
+  MOUNTPOINT_ROOT=$(dirname "$(which "$0")")/../../..
+  MOUNTPOINT_PATH=$MOUNTPOINT_ROOT/target/release/mount-s3
+  echo "Mountpoint path: $MOUNTPOINT_PATH"
 }
 
-trap cleanup EXIT
+function spawn_mounts() {
+  FSTAB_CONTENT=$1
+  export SYSTEMD_FSTAB=$(mktemp)
+  export SYSTEMD_PROC_CMDLINE=""
 
-echo -e "Mounted!\n\n"
+  OUTPUT_DIR="$MOUNTPOINT_ROOT/out"
+  GENERATOR_BIN="/usr/lib/systemd/system-generators/systemd-fstab-generator"
+  SYSTEMD_MOUNT_DIR=/etc/systemd/system/
+  UNIT_SOURCE_DIR=$OUTPUT_DIR/normal
 
-ls -l /mnt/mountpoint/
+  echo "$FSTAB_CONTENT" > "$SYSTEMD_FSTAB"
 
-echo "data" | sudo tee /mnt/mountpoint/data
+  rm -r "$OUTPUT_DIR" || true
+  mkdir -p "$OUTPUT_DIR"/{normal,early,late}
 
-if ! grep -q 'data' /mnt/mountpoint/data
-then
-  echo "Data file does not contain correct data"
-  exit 1
-fi
-sudo rm /mnt/mountpoint/data
+  $GENERATOR_BIN "$UNIT_SOURCE_DIR" "$OUTPUT_DIR/early" "$OUTPUT_DIR/late"
+
+  sudo cp -r "$UNIT_SOURCE_DIR" "$SYSTEMD_MOUNT_DIR"
+  sudo systemctl daemon-reload
+
+  for unit in "$UNIT_SOURCE_DIR"/*; do
+    unit=$(basename $unit)
+    sudo systemctl start "$unit"
+
+    echo -e "\nStatus of systemd unit $unit:"
+    sudo systemctl status "$unit" | cat
+  done
+
+  trap cleanup EXIT
+}
+
+function cleanup {
+  rm "$SYSTEMD_FSTAB"
+  for unit in "$UNIT_SOURCE_DIR"/*; do
+    sudo systemctl stop "$(basename "$unit")"
+    sudo rm "$unit"
+  done
+}
